@@ -125,6 +125,11 @@ Readonly::Hash my %NOT => map { $_ => 1 } ( q{!}, 'not' );
 # is still a condition if the whole chain is one.
 Readonly::Hash my %LOGICAL => map { $_ => 1 } ( qw{&& || // and or xor not}, q{!} );
 
+# The operators before which a chain is a value rather than a condition: an
+# assignment takes it, a comma passes it, and ?: picks it as a branch.  Any
+# other operator to the left belongs to another operand of the chain.
+Readonly::Hash my %VALUE_STARTS => map { $_ => 1 } ( qw{= += -= *= /= .= %= x= **= //= ||= &&= |= &= ^= <<= >>= => ? :}, q{,} );
+
 # What makes the rest of a statement its condition.
 Readonly::Hash my %MODIFIER => map { $_ => 1 } qw{if unless while until};
 
@@ -213,7 +218,7 @@ sub _is_boolean {
     while ($left) {
         return 1 if $left->isa('PPI::Token::Word')     && $MODIFIER{ $left->content };
         return 0 if $left->isa('PPI::Token::Word')     && $left->content eq 'return';
-        return 0 if $left->isa('PPI::Token::Operator') && !$LOGICAL{ $left->content };
+        return 0 if $left->isa('PPI::Token::Operator') && $VALUE_STARTS{ $left->content };
         $left = $left->sprevious_sibling;
     }
 

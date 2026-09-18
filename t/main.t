@@ -98,6 +98,9 @@ check_table(
     'returned, parenthesised, then tested' => [ 1, q{return ( length $v ) ? $v : undef;} ],
     'returned without parens, then tested' => [ 1, q{return length($p) ? $p : q{/};} ],
     'a modifier with parens'               => [ 1, q{f() if ( length $x );} ],
+    'after a deref in the chain'           => [ 1, q{my @k = grep { !$w->{$_} && length $c->{$_} } @keys;} ],
+    'after a comparison in the chain'      => [ 1, q{f() if $n == 1 && length $x;} ],
+    'after a match in the chain'           => [ 1, q{f() if $y =~ m/z/ && length $x;} ],
 );
 
 check_table(
@@ -111,6 +114,8 @@ check_table(
     'returned'               => [ 0, q{return length $x;} ],
     'returned in a chain'    => [ 0, q{return length $x && $y;} ],
     'returned in parens'     => [ 0, q{return ( length $x );} ],
+    'assigned from a chain'  => [ 0, q{my $ok = $n == 1 && length $x;} ],
+    'in a list with a comma' => [ 0, q{f( $n, length $x && $y );} ],
     'an argument'            => [ 0, q{f( length $x );} ],
     'an argument in a cond'  => [ 0, q{g() if f( length $x );} ],
     'printed'                => [ 0, q{print length $x if $y;} ],
