@@ -4,7 +4,7 @@ Perl::Critic::Policy::ValuesAndExpressions::ProhibitDefinedBeforeLength - Test t
 
 # VERSION
 
-version 0.001
+version 0.002
 
 # Perl::Critic::Policy::ValuesAndExpressions::ProhibitDefinedBeforeLength
 
