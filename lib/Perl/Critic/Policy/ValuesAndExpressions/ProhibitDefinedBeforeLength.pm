@@ -237,11 +237,12 @@ sub _is_boolean_place {
 
     return 1 if $holder->isa('PPI::Structure::Condition');
 
-    # Parenthesised: the list is the term, one level out -- unless it is the
-    # argument list of a call.
+    # Parenthesised: the list is the term, one level out.  After return it is a
+    # value like any other term.  After any other word, it is the argument list
+    # of a call.
     if ( $holder->isa('PPI::Structure::List') ) {
         my $before = $holder->sprevious_sibling;
-        return 0 if $before && $before->isa('PPI::Token::Word');
+        return 0 if $before && $before->isa('PPI::Token::Word') && $before->content ne 'return';
         return _is_boolean( $holder, $holder->snext_sibling );
     }
 
