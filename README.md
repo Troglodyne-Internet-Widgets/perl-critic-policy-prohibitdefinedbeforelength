@@ -1,6 +1,6 @@
 # NAME
 
-Perl::Critic::Policy::ValuesAndExpressions::ProhibitDefinedBeforeLength - length alone asks whether a value is empty; defined first is a second op.
+Perl::Critic::Policy::ValuesAndExpressions::ProhibitDefinedBeforeLength - Test the value, not its length, and shape it before measuring it.
 
 # VERSION
 
