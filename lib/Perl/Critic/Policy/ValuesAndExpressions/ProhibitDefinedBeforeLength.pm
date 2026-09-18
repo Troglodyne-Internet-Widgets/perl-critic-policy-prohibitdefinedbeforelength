@@ -31,15 +31,23 @@ than guarding the comparison:
     return if length $uri > 2048;                   # correct solution
 
 Under C<use warnings FATAL =E<gt> 'all'>, C<length(undef) E<gt> 2048> dies.
-That is working as designed: it forces the value into shape before it reaches
-the conditional, instead of a C<defined> in front of every use.
+That is working as designed: you should validate/coerce your inputs type before
+you start blithely shoving them into conditionals past which they subtly pollute
+your program.
 
 In a boolean context, the value alone is false for undef, the empty string and
 C<"0">.  C<length> is true for C<"0">, and that difference is the reason the
-pattern spread.  It catches as many bugs as it causes -- a string that was never
-passed through C<int()>, for one -- so the policy asks for the cheaper test and
-accepts the wart.  Where C<"0"> is a real value, say so with a C<## no critic>
-and a reason.
+pattern spread.  It catches as many bugs as it causes:
+
+    my $a = read_value_from_file(...);
+    my $b = read_value_from_file(...);    # guess what read() returns? not integers!
+    if (length($a)) { print $a }          # hey this is great, maybe saved a print op.
+    if (length($b)) { return 5 / $b }     # Now I've got a divide by zero bug.
+
+so the policy asks for the cheaper test, since
+there is no avoiding awareness of this distinction in perl.
+
+Where C<"0"> is a value you actually want the length of, say so with a C<## no critic> and a reason.
 
 The saving is largest in a loop, where the redundant ops run per element:
 

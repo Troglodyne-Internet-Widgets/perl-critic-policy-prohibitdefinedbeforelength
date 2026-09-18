@@ -27,15 +27,25 @@ return if length $uri > 2048;                   # correct solution
 ```
 
 Under `use warnings FATAL => 'all'`, `length(undef) > 2048` dies.
-That is working as designed: it forces the value into shape before it reaches
-the conditional, instead of a `defined` in front of every use.
+That is working as designed: you should validate/coerce your inputs type before
+you start blithely shoving them into conditionals past which they subtly pollute
+your program.
 
 In a boolean context, the value alone is false for undef, the empty string and
 `"0"`.  `length` is true for `"0"`, and that difference is the reason the
-pattern spread.  It catches as many bugs as it causes -- a string that was never
-passed through `int()`, for one -- so the policy asks for the cheaper test and
-accepts the wart.  Where `"0"` is a real value, say so with a `## no critic`
-and a reason.
+pattern spread.  It catches as many bugs as it causes:
+
+```perl
+my $a = read_value_from_file(...);
+my $b = read_value_from_file(...);    # guess what read() returns? not integers!
+if (length($a)) { print $a }          # hey this is great, maybe saved a print op.
+if (length($b)) { return 5 / $b }     # Now I've got a divide by zero bug.
+```
+
+so the policy asks for the cheaper test, since
+there is no avoiding awareness of this distinction in perl.
+
+Where `"0"` is a value you actually want the length of, say so with a `## no critic` and a reason.
 
 The saving is largest in a loop, where the redundant ops run per element:
 
@@ -102,6 +112,15 @@ from anywhere.
 ### supported\_parameters
 
 None.
+
+# BUGS
+
+Please report any bugs or feature requests on the bugtracker website
+[https://github.com/teodesian/perl-critic-policy-prohibitdefinedbeforelength/issues](https://github.com/teodesian/perl-critic-policy-prohibitdefinedbeforelength/issues)
+
+When submitting a bug or request, please include a test-file or a
+patch to an existing test-file that illustrates the bug or desired
+feature.
 
 # AUTHORS
 
