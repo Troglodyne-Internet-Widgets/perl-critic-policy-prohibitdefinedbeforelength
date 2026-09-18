@@ -4,9 +4,9 @@ How to work in this repository.  What the code *is* and how it is written are in
 the POD and in the files pointed at below; this is the procedure.
 
 Perl-Critic-Policy-ValuesAndExpressions-ProhibitDefinedBeforeLength is one
-Perl::Critic policy.  It reports `defined $x && length $x` and its negation,
-because `length(undef)` is undef and does not warn, so `length` alone does the
-job.
+Perl::Critic policy.  It reports `defined $x && length $x`, and a `length`
+whose value is only tested for truth, because in a boolean context the value
+alone does the job with no call.
 
 The rule lives in two files.
 `lib/Perl/Critic/Policy/ValuesAndExpressions/ProhibitDefinedBeforeLength.pm` is
