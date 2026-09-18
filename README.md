@@ -9,58 +9,86 @@ version 0.001
 # Perl::Critic::Policy::ValuesAndExpressions::ProhibitDefinedBeforeLength
 
 Asking whether a value is defined and then whether it has a length is two
-operations where one does the job:
+operations where one does the job, and in a boolean context neither is needed:
 
 ```
-return unless defined $uri && length $uri;      # reported
-return unless length $uri;                      # what it means
+return unless defined $uri && length $uri;      # what you see - violates
+return unless length $uri;                      # what it means - still violates
+return unless $uri;                             # what should actually be done
 ```
 
-Since perl 5.12, `length(undef)` is undef and does not warn, so `length` alone
-is false for undef and for the empty string, and true for everything else --
-including `"0"`.
+When the length itself matters, shape the value before the comparison rather
+than guarding the comparison:
 
-Which of the two to keep depends on what the value is for:
+```
+return if defined $uri && length $uri > 2048;   # we care about the length - violates
+$uri //= q{};                                   # shape the data first
+return if length $uri > 2048;                   # correct solution
+```
 
-- If the length matters -- `"0"` is a value, and only undef and the empty string
-are not -- keep `length` and drop `defined`.
-- If only truth matters, drop both: `&& $value` is false for undef, the empty
-string and `"0"`.
+Under `use warnings FATAL => 'all'`, `length(undef) > 2048` dies.
+That is working as designed: it forces the value into shape before it reaches
+the conditional, instead of a `defined` in front of every use.
 
-The policy cannot tell those apart, so it reports the pair and leaves the choice
-to whoever reads the finding.  It is worth making in a loop, where the redundant
-op runs once per element:
+In a boolean context, the value alone is false for undef, the empty string and
+`"0"`.  `length` is true for `"0"`, and that difference is the reason the
+pattern spread.  It catches as many bugs as it causes -- a string that was never
+passed through `int()`, for one -- so the policy asks for the cheaper test and
+accepts the wart.  Where `"0"` is a real value, say so with a `## no critic`
+and a reason.
+
+The saving is largest in a loop, where the redundant ops run per element:
 
 ```perl
-grep { defined $_ && length $_ } @list;         # reported
-grep { length } @list;                          # length defaults to $_
+grep { defined $_ && length $_ } @list;         # 3 calls
+grep { length } @list;                          # one call
+grep { $_ } @list;                              # no calls!
 ```
 
 ## PROHIBITED
+
+Anywhere:
 
 ```perl
 defined $x && length $x
 defined($x) and length($x)
 defined $h->{key} && length $h->{key}
 defined && length                               # both of $_
+defined $x && length $x > 3                     # shape $x first
 
 !defined $x || !length $x                       # the negation
 not defined $x or not length $x
 ```
 
+In a boolean context -- the condition of `if`, `unless`, `while` or
+`until`, a statement modifier, the operand of `!` or `not`, the condition of
+`?:`, or the block of `grep`, `first`, `any`, `all`, `none` or `notall`:
+
+```
+length $x                                       # waste of time in boolean context
+!length $x
+```
+
 ## ALLOWED
 
-```
-length $x
+```perl
+$x                                              # in a boolean context
 defined $x && length $y                         # two different values
-defined $x && length $x > 3                     # length(undef) > 3 warns
 defined $x && $x ne q{}
+length $x > 3                                   # the length is used
+my $size = length $x;                           # not a boolean context
 ```
 
-`length` followed by a comparison or arithmetic is left alone, because there
-the `defined` is doing a job: `length(undef) > 3` is a comparison of undef
-and warns.  `defined $x && $x ne q{}` is a different way to write the same
-test and is not reported either.
+`defined $x && $x ne q{}` is a different way to write the test, and is not
+reported.
+
+## CAVEATS
+
+Assigning the result of `length` and using it later will not be checked.
+
+A `length` that is the operand of `&&` or `||` in an assignment or a
+`return`, such as `return length $x && $y`, is a value rather than a
+condition, and is not reported either.
 
 # CONFIGURATION
 

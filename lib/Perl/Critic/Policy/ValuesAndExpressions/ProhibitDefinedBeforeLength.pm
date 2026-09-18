@@ -17,59 +17,74 @@ use parent              qw{Perl::Critic::Policy};
 =head1 Perl::Critic::Policy::ValuesAndExpressions::ProhibitDefinedBeforeLength
 
 Asking whether a value is defined and then whether it has a length is two
-operations where one does the job:
+operations where one does the job, and in a boolean context neither is needed:
 
-    return unless defined $uri && length $uri;      # reported
-    return unless length $uri;                      # what it means
+    return unless defined $uri && length $uri;      # what you see - violates
+    return unless length $uri;                      # what it means - still violates
+    return unless $uri;                             # what should actually be done
 
-Since perl 5.12, C<length(undef)> is undef and does not warn, so C<length> alone
-is false for undef and for the empty string, and true for everything else --
-including C<"0">.
+When the length itself matters, shape the value before the comparison rather
+than guarding the comparison:
 
-Which of the two to keep depends on what the value is for:
+    return if defined $uri && length $uri > 2048;   # we care about the length - violates
+    $uri //= q{};                                   # shape the data first
+    return if length $uri > 2048;                   # correct solution
 
-=over 4
+Under C<use warnings FATAL =E<gt> 'all'>, C<length(undef) E<gt> 2048> dies.
+That is working as designed: it forces the value into shape before it reaches
+the conditional, instead of a C<defined> in front of every use.
 
-=item *
+In a boolean context, the value alone is false for undef, the empty string and
+C<"0">.  C<length> is true for C<"0">, and that difference is the reason the
+pattern spread.  It catches as many bugs as it causes -- a string that was never
+passed through C<int()>, for one -- so the policy asks for the cheaper test and
+accepts the wart.  Where C<"0"> is a real value, say so with a C<## no critic>
+and a reason.
 
-If the length matters -- C<"0"> is a value, and only undef and the empty string
-are not -- keep C<length> and drop C<defined>.
+The saving is largest in a loop, where the redundant ops run per element:
 
-=item *
-
-If only truth matters, drop both: C<&& $value> is false for undef, the empty
-string and C<"0">.
-
-=back
-
-The policy cannot tell those apart, so it reports the pair and leaves the choice
-to whoever reads the finding.  It is worth making in a loop, where the redundant
-op runs once per element:
-
-    grep { defined $_ && length $_ } @list;         # reported
-    grep { length } @list;                          # length defaults to $_
+    grep { defined $_ && length $_ } @list;         # 3 calls
+    grep { length } @list;                          # one call
+    grep { $_ } @list;                              # no calls!
 
 =head2 PROHIBITED
+
+Anywhere:
 
     defined $x && length $x
     defined($x) and length($x)
     defined $h->{key} && length $h->{key}
     defined && length                               # both of $_
+    defined $x && length $x > 3                     # shape $x first
 
     !defined $x || !length $x                       # the negation
     not defined $x or not length $x
 
+In a boolean context -- the condition of C<if>, C<unless>, C<while> or
+C<until>, a statement modifier, the operand of C<!> or C<not>, the condition of
+C<?:>, or the block of C<grep>, C<first>, C<any>, C<all>, C<none> or C<notall>:
+
+    length $x                                       # waste of time in boolean context
+    !length $x
+
 =head2 ALLOWED
 
-    length $x
+    $x                                              # in a boolean context
     defined $x && length $y                         # two different values
-    defined $x && length $x > 3                     # length(undef) > 3 warns
     defined $x && $x ne q{}
+    length $x > 3                                   # the length is used
+    my $size = length $x;                           # not a boolean context
 
-C<length> followed by a comparison or arithmetic is left alone, because there
-the C<defined> is doing a job: C<length(undef) E<gt> 3> is a comparison of undef
-and warns.  C<defined $x && $x ne q{}> is a different way to write the same
-test and is not reported either.
+C<defined $x && $x ne q{}> is a different way to write the test, and is not
+reported.
+
+=head2 CAVEATS
+
+Assigning the result of C<length> and using it later will not be checked.
+
+A C<length> that is the operand of C<&&> or C<||> in an assignment or a
+C<return>, such as C<return length $x && $y>, is a value rather than a
+condition, and is not reported either.
 
 =head1 CONFIGURATION
 
@@ -88,18 +103,25 @@ None.
 
 =cut
 
-Readonly::Scalar my $DESC => 'defined before length on the same value';
-Readonly::Scalar my $EXPL => 'length(undef) is undef and does not warn: use length alone, or the value alone where only truth matters';
+Readonly::Scalar my $PAIR_DESC => 'defined before length on the same value';
+Readonly::Scalar my $PAIR_EXPL => 'In a boolean context use the value alone; where the length matters, shape the value first ($x //= q{})';
+Readonly::Scalar my $BARE_DESC => 'length in a boolean context';
+Readonly::Scalar my $BARE_EXPL => 'The value alone is false for undef and the empty string, and needs no call';
 
-# The operators that join the two halves, positive and negated.
+# The operators that join the two halves of a pair, positive and negated.
 Readonly::Hash my %AND => map { $_ => 1 } qw{&& and};
 Readonly::Hash my %OR  => map { $_ => 1 } qw{|| or};
 Readonly::Hash my %NOT => map { $_ => 1 } ( q{!}, 'not' );
 
-# What may follow the length for its value to be tested for truth and nothing
-# else.  Anything else -- a comparison, arithmetic -- uses the number, and
-# length(undef) there warns.
-Readonly::Hash my %BOOLEAN_BOUNDARY => map { $_ => 1 } ( qw{&& || // and or xor ? :}, q{,}, q{=>} );
+# The operators a condition is built from.  A length joined to others by these
+# is still a condition if the whole chain is one.
+Readonly::Hash my %LOGICAL => map { $_ => 1 } ( qw{&& || // and or xor not}, q{!} );
+
+# What makes the rest of a statement its condition.
+Readonly::Hash my %MODIFIER => map { $_ => 1 } qw{if unless while until};
+
+# The list functions whose block is a test of each element.
+Readonly::Hash my %TESTS_EACH => map { $_ => 1 } qw{grep first any all none notall};
 
 sub supported_parameters { return () }
 sub default_severity     { return $SEVERITY_LOW }
@@ -109,27 +131,121 @@ sub applies_to           { return 'PPI::Token::Word' }
 sub violates {
     my ( $self, $elem, undef ) = @_;
 
-    return () unless $elem->content eq 'defined';
     return () if is_hash_key($elem) || is_method_call($elem);
 
-    my $negated = _is_not( $elem->sprevious_sibling );
+    if ( $elem->content eq 'defined' ) {
+        return () unless _pair($elem);
+        return $self->violation( $PAIR_DESC, $PAIR_EXPL, $elem );
+    }
 
-    my ( $operand, $after ) = _operand($elem);
-    return () unless $after && $after->isa('PPI::Token::Operator');
-    return () unless $negated ? $OR{ $after->content } : $AND{ $after->content };
+    return () unless $elem->content eq 'length';
+    return () if _second_half_of_a_pair($elem);
+
+    my ( undef, $after ) = _operand($elem);
+    return () unless _is_boolean( $elem, $after );
+    return $self->violation( $BARE_DESC, $BARE_EXPL, $elem );
+}
+
+# The length a defined is paired with, or nothing: `defined $x && length $x`,
+# or its negation `!defined $x || !length $x`, on the same operand.
+sub _pair {
+    my ($defined) = @_;
+
+    my $negated = _is_not( $defined->sprevious_sibling );
+
+    my ( $operand, $after ) = _operand($defined);
+    return unless $after && $after->isa('PPI::Token::Operator');
+    return unless $negated ? $OR{ $after->content } : $AND{ $after->content };
 
     my $length = $after->snext_sibling;
     if ($negated) {
-        return () unless _is_not($length);
+        return unless _is_not($length);
         $length = $length->snext_sibling;
     }
-    return () unless $length && $length->isa('PPI::Token::Word') && $length->content eq 'length';
+    return unless $length && $length->isa('PPI::Token::Word') && $length->content eq 'length';
 
-    my ( $measured, $end ) = _operand($length);
-    return () unless $measured eq $operand;
-    return () if $end && !_ends_boolean($end);
+    my ($measured) = _operand($length);
+    return unless $measured eq $operand;
+    return $length;
+}
 
-    return $self->violation( $DESC, $EXPL, $elem );
+# Reported already, as the pair.
+sub _second_half_of_a_pair {
+    my ($length) = @_;
+
+    my $sibling = $length->sprevious_sibling;
+    while ($sibling) {
+        if ( $sibling->isa('PPI::Token::Word') && $sibling->content eq 'defined' ) {
+            my $paired = _pair($sibling);
+            return 1 if $paired && $paired == $length;
+        }
+        $sibling = $sibling->sprevious_sibling;
+    }
+    return 0;
+}
+
+# Whether the value of a term is only tested for truth.  $start is the term's
+# first element and $after the first sibling past it.
+sub _is_boolean {
+    my ( $start, $after ) = @_;
+
+    my $before = $start->sprevious_sibling;
+    return 1 if _is_not($before);
+
+    # What the term is used for, from what is right beside it: `?` tests it,
+    # and any other operator that is not logical uses its value.
+    if ( $after && $after->isa('PPI::Token::Operator') ) {
+        return 1 if $after->content eq q{?};
+        return 0 unless $LOGICAL{ $after->content };
+    }
+    return 0 if $before && $before->isa('PPI::Token::Operator') && !$LOGICAL{ $before->content };
+
+    # Then along the chain of logical operators it is part of.
+    my $left = $before;
+    while ($left) {
+        return 1 if $left->isa('PPI::Token::Word')     && $MODIFIER{ $left->content };
+        return 0 if $left->isa('PPI::Token::Word')     && $left->content eq 'return';
+        return 0 if $left->isa('PPI::Token::Operator') && !$LOGICAL{ $left->content };
+        $left = $left->sprevious_sibling;
+    }
+
+    my $right = $after;
+    while ($right) {
+        return 1 if $right->isa('PPI::Token::Operator') && $right->content eq q{?};
+        last     if $right->isa('PPI::Token::Operator') && $right->content =~ m/\A(?:,|=>|:)\z/;
+        last     if $right->isa('PPI::Token::Word')     && $MODIFIER{ $right->content };
+        $right = $right->snext_sibling;
+    }
+
+    return _is_boolean_place($start);
+}
+
+# The chain reached the edge of its statement, so the statement's place decides.
+sub _is_boolean_place {
+    my ($start) = @_;
+
+    my $statement = $start->parent     or return 0;
+    my $holder    = $statement->parent or return 0;
+
+    return 1 if $holder->isa('PPI::Structure::Condition');
+
+    # Parenthesised: the list is the term, one level out -- unless it is the
+    # argument list of a call.
+    if ( $holder->isa('PPI::Structure::List') ) {
+        my $before = $holder->sprevious_sibling;
+        return 0 if $before && $before->isa('PPI::Token::Word');
+        return _is_boolean( $holder, $holder->snext_sibling );
+    }
+
+    # The last statement of a grep block is its test.
+    if ( $holder->isa('PPI::Structure::Block') ) {
+        my $call = $holder->sprevious_sibling;
+        return 0 unless $call && $call->isa('PPI::Token::Word') && $TESTS_EACH{ $call->content };
+        my @statements = $holder->schildren;
+        return $statements[-1] == $statement ? 1 : 0;
+    }
+
+    return 0;
 }
 
 # The operand of a named unary op, as text with the whitespace taken out, and
@@ -156,14 +272,14 @@ sub _operand {
     return ( _squash( length $text ? $text : '$_' ), $next );
 }
 
-# A term is a variable, then any run of subscripts, derefs, and method calls
-# with their arguments.  A word is part of it only as a method name.
+# A term is a variable, a quoted string or a call, then any run of subscripts,
+# derefs, and method calls with their arguments.  A word is part of it only as
+# a function or method name.
 sub _continues_term {
     my ( $elem, $term ) = @_;
 
     my $last = $term->[-1];
-    return $elem->isa('PPI::Token::Symbol') || $elem->isa('PPI::Token::Magic') || $elem->isa('PPI::Token::Cast')
-      unless $last;
+    return _starts_term($elem) unless $last;
 
     return 1 if $elem->isa('PPI::Structure::Subscript');
     return 1 if $elem->isa('PPI::Token::Operator') && $elem->content eq '->';
@@ -176,12 +292,12 @@ sub _continues_term {
     return 0;
 }
 
-sub _ends_boolean {
+sub _starts_term {
     my ($elem) = @_;
 
-    return 1 if $elem->isa('PPI::Token::Structure') && $elem->content eq q{;};
-    return 1 if $elem->isa('PPI::Token::Operator')  && $BOOLEAN_BOUNDARY{ $elem->content };
-    return 1 if $elem->isa('PPI::Token::Word')      && $elem->content =~ m/\A(?:if|unless|while|until|for|foreach)\z/;
+    return 1 if $elem->isa('PPI::Token::Symbol') || $elem->isa('PPI::Token::Magic') || $elem->isa('PPI::Token::Cast');
+    return 1 if $elem->isa('PPI::Token::Quote');
+    return 1 if $elem->isa('PPI::Token::Word') && !$MODIFIER{ $elem->content } && $elem->content !~ m/\A(?:for|foreach|x)\z/;
     return 0;
 }
 
