@@ -131,6 +131,12 @@ Readonly::Hash my %MODIFIER => map { $_ => 1 } qw{if unless while until};
 # The list functions whose block is a test of each element.
 Readonly::Hash my %TESTS_EACH => map { $_ => 1 } qw{grep first any all none notall};
 
+# What ends the right-hand side of a term when looking for a `?`.
+Readonly::Hash my %CLAUSE_END => ( q{,} => 1, q{=>} => 1, q{:} => 1 );
+
+# Words that follow a term without being part of it.
+Readonly::Hash my %NOT_A_TERM_WORD => map { $_ => 1 } qw{for foreach x};
+
 sub supported_parameters { return () }
 sub default_severity     { return $SEVERITY_LOW }
 sub default_themes       { return qw{troglodyne performance maintenance} }
@@ -220,7 +226,7 @@ sub _is_boolean {
     my $right = $after;
     while ($right) {
         return 1 if $right->isa('PPI::Token::Operator') && $right->content eq q{?};
-        last     if $right->isa('PPI::Token::Operator') && $right->content =~ m/\A(?:,|=>|:)\z/;
+        last     if $right->isa('PPI::Token::Operator') && $CLAUSE_END{ $right->content };
         last     if $right->isa('PPI::Token::Word')     && $MODIFIER{ $right->content };
         $right = $right->snext_sibling;
     }
@@ -266,8 +272,8 @@ sub _operand {
     my $next = $op->snext_sibling;
 
     if ( $next && $next->isa('PPI::Structure::List') ) {
-        my $inside = join( q{}, map { $_->content } $next->schildren );
-        return ( _squash( length $inside ? $inside : '$_' ), $next->snext_sibling );
+        my $inside = _text_of( $next->schildren );
+        return ( _squash( $inside eq q{} ? '$_' : $inside ), $next->snext_sibling );
     }
 
     my @term;
@@ -276,8 +282,8 @@ sub _operand {
         $next = $next->snext_sibling;
     }
 
-    my $text = join( q{}, map { $_->content } @term );
-    return ( _squash( length $text ? $text : '$_' ), $next );
+    my $text = _text_of(@term);
+    return ( _squash( $text eq q{} ? '$_' : $text ), $next );
 }
 
 # A term is a variable, a quoted string or a call, then any run of subscripts,
@@ -305,7 +311,7 @@ sub _starts_term {
 
     return 1 if $elem->isa('PPI::Token::Symbol') || $elem->isa('PPI::Token::Magic') || $elem->isa('PPI::Token::Cast');
     return 1 if $elem->isa('PPI::Token::Quote');
-    return 1 if $elem->isa('PPI::Token::Word') && !$MODIFIER{ $elem->content } && $elem->content !~ m/\A(?:for|foreach|x)\z/;
+    return 1 if $elem->isa('PPI::Token::Word') && !$MODIFIER{ $elem->content } && !$NOT_A_TERM_WORD{ $elem->content };
     return 0;
 }
 
@@ -316,7 +322,19 @@ sub _is_not {
 
 sub _squash {
     my ($text) = @_;
-    $text =~ s/\s+//g;
+    $text =~ s/\s+//gsx;
+    return $text;
+}
+
+# The source text of a run of elements, with nothing between them.  A loop
+# rather than a map, so no call is made while $_ is the caller's element.
+sub _text_of {
+    my (@elems) = @_;
+
+    my $text = q{};
+    for my $elem (@elems) {
+        $text .= $elem->content;
+    }
     return $text;
 }
 
