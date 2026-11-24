@@ -1,3 +1,5 @@
+package main;
+
 use strict;
 use warnings FATAL => 'all';
 
@@ -7,7 +9,7 @@ use 5.014;
 
 =head1 NAME
 
-t/main.t - which uses of defined and length the policy reports, and which it leaves alone
+main - which uses of defined and length the policy reports, and which it leaves alone
 
 =head1 DESCRIPTION
 
@@ -125,3 +127,5 @@ check_table(
 is( scalar( () = warnings { Perl::Critic->new( -profile => q{}, '-single-policy' => $POLICY ) } ), 0, 'nothing warns on construction' );
 
 done_testing();
+
+1;
